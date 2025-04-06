@@ -6,9 +6,6 @@ on:
       app_name:
         required: true
         type: string
-      language:
-        required: true
-        type: string
       version:
         required: true
         type: string
@@ -45,30 +42,26 @@ jobs:
           set -euo pipefail
 
           APP_NAME="${{ inputs.app_name }}"
-          LANGUAGE="${{ inputs.language }}"
           VERSION="${{ inputs.version }}"
           ARTIFACT_PATH="${{ inputs.artifact_path }}"
           BUCKET_NAME="${{ inputs.bucket_name }}"
-
-          BASE="s3://${BUCKET_NAME}/${LANGUAGE}/${APP_NAME}"
-          NEW_KEY="${BASE}/${VERSION}/${APP_NAME}-${VERSION}.jar"
-          LATEST_KEY="${BASE}/latest/${APP_NAME}.jar"
-          ARCHIVE_PREFIX="${BASE}/archive"
-          TIMESTAMP=$(date +"%Y%m%d%H%M%S")
-          ARCHIVE_KEY="${ARCHIVE_PREFIX}/${APP_NAME}-${TIMESTAMP}.jar"
-
-          echo "🔍 Checking for existing 'latest'..."
-          if aws s3 ls "${LATEST_KEY}" > /dev/null 2>&1; then
-            echo "📦 Archiving old latest -> ${ARCHIVE_KEY}"
-            aws s3 mv "${LATEST_KEY}" "${ARCHIVE_KEY}"
+          
+          LATEST_FILENAME="${APP_NAME}-${VERSION}.jar"
+          LATEST_KEY="s3://${BUCKET_NAME}/${APP_NAME}/latest/${LATEST_FILENAME}"
+          ARCHIVE_DIR="s3://${BUCKET_NAME}/archive/${APP_NAME}/latest"
+          
+          echo "🔍 Checking for existing latest artifact..."
+          EXISTING=$(aws s3 ls "s3://${BUCKET_NAME}/${APP_NAME}/latest/" | awk '{print $4}' | head -n 1 || true)
+          
+          if [[ -n "$EXISTING" ]]; then
+            echo "📦 Archiving existing latest: $EXISTING"
+              aws s3 mv "s3://${BUCKET_NAME}/${APP_NAME}/latest/${EXISTING}" \
+              "${ARCHIVE_DIR}/${EXISTING}"
           else
-            echo "ℹ️ No current latest found, skipping archive."
+            echo "ℹ️ No existing latest artifact found. Skipping archive."
           fi
-
-          echo "⬆️ Uploading new version: ${VERSION}"
-          aws s3 cp "${ARTIFACT_PATH}" "${NEW_KEY}"
-
-          echo "🏷️ Promoting to latest"
+            
+          echo "⬆️ Uploading new latest: ${LATEST_FILENAME}"
           aws s3 cp "${ARTIFACT_PATH}" "${LATEST_KEY}"
-
-          echo "✅ Promotion complete!"
+          
+          echo "✅ Promotion complete."
