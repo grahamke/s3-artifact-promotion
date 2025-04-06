@@ -1,0 +1,74 @@
+name: Promote Artifact to S3
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      language:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      artifact_path:
+        required: true
+        type: string
+      bucket_name:
+        required: true
+        type: string
+      aws_region:
+        required: true
+        type: string
+      role_to_assume:
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ inputs.role_to_assume }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Promote artifact to S3
+        run: |
+          set -euo pipefail
+
+          APP_NAME="${{ inputs.app_name }}"
+          LANGUAGE="${{ inputs.language }}"
+          VERSION="${{ inputs.version }}"
+          ARTIFACT_PATH="${{ inputs.artifact_path }}"
+          BUCKET_NAME="${{ inputs.bucket_name }}"
+
+          BASE="s3://${BUCKET_NAME}/${LANGUAGE}/${APP_NAME}"
+          NEW_KEY="${BASE}/${VERSION}/${APP_NAME}-${VERSION}.jar"
+          LATEST_KEY="${BASE}/latest/${APP_NAME}.jar"
+          ARCHIVE_PREFIX="${BASE}/archive"
+          TIMESTAMP=$(date +"%Y%m%d%H%M%S")
+          ARCHIVE_KEY="${ARCHIVE_PREFIX}/${APP_NAME}-${TIMESTAMP}.jar"
+
+          echo "🔍 Checking for existing 'latest'..."
+          if aws s3 ls "${LATEST_KEY}" > /dev/null 2>&1; then
+            echo "📦 Archiving old latest -> ${ARCHIVE_KEY}"
+            aws s3 mv "${LATEST_KEY}" "${ARCHIVE_KEY}"
+          else
+            echo "ℹ️ No current latest found, skipping archive."
+          fi
+
+          echo "⬆️ Uploading new version: ${VERSION}"
+          aws s3 cp "${ARTIFACT_PATH}" "${NEW_KEY}"
+
+          echo "🏷️ Promoting to latest"
+          aws s3 cp "${ARTIFACT_PATH}" "${LATEST_KEY}"
+
+          echo "✅ Promotion complete!"
